@@ -1,0 +1,185 @@
+# Enhanced IPFIX Simulator Configuration
+
+# Kafka export parameters
+kafka:
+  bootstrap_servers: "192.168.91.37:9092"
+  topic: "flows"
+
+# Simulation parameters
+simulation_speed: 10.0  # 10x real-time
+start_time: "2025-03-30T08:00:00"
+end_time: "2025-03-30T20:00:00"
+
+# Traffic profiles
+traffic_profiles:
+  - name: "web_servers"
+    source_networks:
+      - "192.168.0.0/16"
+      - "172.16.0.0/12"
+      - "10.0.0.0/8"
+    destination_networks:
+      - "203.0.113.0/24"
+    protocols: [6, 17, 1, 132]  # TCP, UDP, ICMP, SCTP
+    port_ranges:
+      source: [1024, 65535]
+      destination: [80, 443, 8080, 8443, 8000, 3000]
+    vlans:
+      "192.168.0.0": [10, 11, 12, 13, 14]
+      "172.16.0.0": [20, 21, 22, 23, 24]
+      "10.0.0.0": [30, 31, 32, 33, 34]
+    applications: ["http", "https", "quic", "http2", "graphql", "rest"]
+    urls:
+      - "example.com"
+      - "api.example.com"
+      - "media.example.com"
+      - "download.example.com"
+      - "cdn.example.com"
+      - "auth.example.com"
+      - "static.example.com"
+      - "dashboard.example.com"
+      - "support.example.com"
+      - "img.example.com"
+    flow_size_distribution:
+      type: "lognormal"
+      mean: 8.5
+      sigma: 1.2
+    packet_size_distribution:
+      type: "normal"
+      mean: 800
+      sigma: 300
+      min: 64
+      max: 1500
+    flow_duration_distribution:
+      type: "lognormal"
+      mean: 7.5
+      sigma: 1.5
+    time_pattern:
+      type: "diurnal"
+      flows_per_minute: 5000
+    retransmit_probability: 0.05
+    rst_probability: 0.02
+    fin_probability: 0.8
+
+  - name: "database_traffic"
+    source_networks:
+      - "203.0.113.0/24"
+    destination_networks:
+      - "198.51.100.0/24"
+    protocols: [6, 17, 132]
+    port_ranges:
+      source: [1024, 65535]
+      destination: [3306, 5432, 1521, 1433, 27017, 6379]
+    vlans:
+      "203.0.113.0": [100, 101, 102]
+      "198.51.100.0": [200, 201, 202]
+    applications: ["mysql", "postgres", "oracle", "mssql", "mongodb", "redis"]
+    flow_size_distribution:
+      type: "lognormal"
+      mean: 7.2
+      sigma: 0.8
+    flow_duration_distribution:
+      type: "lognormal"
+      mean: 5.0
+      sigma: 1.0
+    time_pattern:
+      type: "diurnal"
+      flows_per_minute: 2000
+    retransmit_probability: 0.03
+    rst_probability: 0.01
+    fin_probability: 0.9
+
+  - name: "email_traffic"
+    source_networks:
+      - "192.168.0.0/16"
+      - "172.16.0.0/12"
+    destination_networks:
+      - "192.0.2.0/24"
+    protocols: [6, 17, 132]
+    port_ranges:
+      source: [1024, 65535]
+      destination: [25, 143, 110, 636, 587, 465]
+    vlans:
+      "192.168.0.0": [10, 11, 12, 13]
+      "172.16.0.0": [20, 21, 22, 23]
+    applications: ["smtp", "imap", "pop3", "ldaps", "submission", "smtps"]
+    flow_size_distribution:
+      type: "lognormal"
+      mean: 9.5
+      sigma: 2.0
+    time_pattern:
+      type: "weekly"
+      flows_per_minute: 500
+    retransmit_probability: 0.04
+    rst_probability: 0.02
+    fin_probability: 0.85
+
+  - name: "backup_traffic"
+    source_networks:
+      - "198.51.100.0/24"
+      - "203.0.113.0/24"
+    destination_networks:
+      - "203.0.114.0/24"
+    protocols: [6, 17, 132]
+    port_ranges:
+      source: [1024, 65535]
+      destination: [873, 445, 2049]
+    vlans:
+      "198.51.100.0": [200, 201, 202]
+      "203.0.113.0": [100, 101, 103]
+      "203.0.114.0": [110, 111, 112]
+    applications: ["rsync", "smb", "nfs"]
+    flow_size_distribution:
+      type: "lognormal"
+      mean: 14.0
+      sigma: 2.5
+    time_pattern:
+      type: "constant"
+      flows_per_minute: 20
+    retransmit_probability: 0.07
+    rst_probability: 0.03
+    fin_probability: 0.9
+
+# Anomalies configuration
+anomalies:
+  anomalies:
+    - type: "volumetric_ddos"
+      start_time: "2025-03-30T14:00:00"
+      end_time: "2025-03-30T14:30:00"
+      target_ip: "203.0.113.10"
+      target_port: 80
+      flow_count: 200
+
+    - type: "port_scan"
+      start_time: "2025-03-30T10:15:00"
+      end_time: "2025-03-30T10:20:00"
+      source_ip: "172.16.42.123"
+      target_ip: "198.51.100.5"
+      port_count: 100
+
+    - type: "data_exfiltration"
+      start_time: "2025-03-30T16:45:00"
+      end_time: "2025-03-30T17:00:00"
+      source_ip: "192.168.1.42"
+      destination_ip: "209.85.200.100"
+
+    - type: "unusual_protocol"
+      start_time: "2025-03-30T18:30:00"
+      end_time: "2025-03-30T19:00:00"
+      source_ip: "192.168.15.20"
+      destination_ip: "198.51.100.42"
+      protocol: 47  # GRE
+
+    - type: "connection_failure"
+      start_time: "2025-03-30T11:00:00"
+      end_time: "2025-03-30T11:15:00"
+      source_network: "192.168.0.0/16"
+      destination_ip: "203.0.113.15"
+      port: 443
+      flow_count: 50
+
+    - type: "slow_response"
+      start_time: "2025-03-30T15:30:00"
+      end_time: "2025-03-30T16:00:00"
+      destination_ip: "203.0.113.20"
+      port: 80
+      flow_count: 30
