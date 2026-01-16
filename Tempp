@@ -1,112 +1,155 @@
-import ipaddress import json import random import time import logging import argparse import yaml import os import csv from collections import defaultdict from datetime import datetime, timedelta from typing import Dict, List, Any import numpy as np from scipy import stats from faker import Faker
+Start Description            : 1. Telnet to RG
+#                               : 2. Load the required BGW320 image
+#                               : 3. Go to the linux prompt
+#                               : 4. The default value of Critical rise threshold is 80 and maximum value is 100 and when set the Critical rise threshold value less than 3 then CPU will reach to critical state.
+#                               : 5. Execute the below ba-cli command for reaching to critical state
+#                               :    ba-cli Device.DeviceInfo.ProcessStatus.CPU.1.CriticalRiseThreshold=2
+#                               :    ba-cli Device.DeviceInfo.ProcessStatus.CPU.?
+#                               : 6. Verify after reaching to critical state, time stamp should be updated properly in below shown parameter.
+#                               :    ba-cli Device.DeviceInfo.ProcessStatus.CPU.1.CriticalRiseTimeStamp?
+#                               :    ba-cli Device.DeviceInfo.ProcessStatus.CPU.?
+#                               : 7. Verify the pidstat log file generated once the critical state is reached
+#                               :    cd /var/run/
+#                               :    ls
+#                               :    cat /var/run/rm_pidstat_full.txt
+#                               : 8. After running the above commands in linux prompt log file is generated.
+#                               : 9. Restart the RG
+#                               : 10. Once RG is up and running check the Pidstat log
+########################################################################################################################################################
+*** Settings ***
+Library    Collections
+Library    Selenium2Library
+Library    Telnet
+Library    OperatingSystem
+Library    String
+Resource    Automation/Resource/Common/Device_Connection.robot
+Resource    Automation/Resource/Common/RG_Common_Procedures.robot
+Resource    Automation/Resource/Common/CGNAT_Procedures.robot
+Resource    Automation/Resource/TR069/TR069_Generic_Procedures.robot
+Resource    Automation/Resource/Common/RG_Common_Procedures.robot
+Resource    Automation/Resource/Common/Image_Upgrade_Procedures.robot
+Resource    Automation/Resource/Common/Selenium_Common_Procedures.robot
+Variables    Automation/Config/CLI_Parameters.py
+Variables    Automation/Config/Common_Parameters.py
+Variables    Automation/Config/TR69_Parameters.py
+Variables    Automation/Config/Generic_Module_Parameters.py
+Variables    Automation/Config/Selenium_Parameters.py
+Variables    Automation/Config/Ubus_Parameters.py
+Variables    Automation/Test_Suite/General_Operation/General_Operation_Config.py
+Variables    Automation/Test_Suite/Diagnostics_and_Monitoring/Diagnostics_And_Monitoring_Config.py
+Test Setup    Common_Setup
+Test Teardown    Common_Cleanup
 
-Configure logging
+*** Test Cases ***
+Resmon_CPU_Status_Critical_Rise_And_Fall_Time_Stamp_After_Restart.robot
+    STEP_1_Verify_RG_Obtained_WAN_IP
+    STEP_2_Configure_NTP_Servers_And_Check_Time_Status
+    STEP_3_Verify_Device_Date_And_Time
+    STEP_4_Set_The_CriticalRiseThreshold_Value
+    STEP_5_Check_CPU_CriticalRiseTimeStamp
+    STEP_6_Set_The_CriticalFallThreshold_Value
+    STEP_7_Check_CPU_CriticalFallTimeStamp
+    STEP_8_Verify_File_Rm_Pidstat_Full_Is_Created
+    STEP_9_Restart_RG_Through_CLI
 
-logging.basicConfig( level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s' ) logger = logging.getLogger('enhanced-ipfix-simulator')
+*** Keywords ***
+Common_Setup
+    Log To Console    ***Common Setup***
+    Common_CLI_RG_Connect
+    Common_CLI_RG_Supplicant_OFF    ${RG_Supplicant_Cmd}
 
-fake = Faker()
+Common_Cleanup   
+    Run Keywords    Teardown
+    ...    AND    Common_CLI_RG_Disconnect
 
-def random_mac(): return ':'.join([f'{random.randint(0, 255):02x}' for _ in range(6)])
+STEP_1_Verify_RG_Obtained_WAN_IP
+    Log To Console    "***STEP_1: Verify_RG_Obtained_WAN_IP***"
+    ${RG_WAN_IPAddress}    Check_WAN_IP    ${TR69_WAN_IP}
+    Set Global Variable    ${RG_WAN_IPAddress}
+    Log To Console    "The WAN IP addresses assigned: ${RG_WAN_IPAddress}"
 
-(TrafficProfile and AnomalyGenerator remain unchanged)
+STEP_2_Configure_NTP_Servers_And_Check_Time_Status
+    Log To Console    "***STEP_2: Configure_NTP_Servers_And_Check_Time_Status***"
+    UBus_SetParameterValue    SPV    ${UBus_Time_Client_1_Servers}    ${NTP_Servers_IP_PRPL}
+    :FOR    ${Index}    IN RANGE    0    10
+    \    Sleep    10s  
+    \    ${NTP_Status}   UBus_GetParameterValue    GPV_Return   ${UBus_Time_Status}
+    \    Exit For Loop If    '${NTP_Status}'=='${NTP_Synchronized}'
+    Run Keyword if  '${NTP_Status}'=='${NTP_Synchronized}'
+    ...     Log     -pass "NTP Server is Synchronized"
+    ...     ELSE
+    ...     Fail    -fail "NTP Server is not Synchronized"
 
-Skipping their code here for brevity - they are unchanged.
+STEP_3_Verify_Device_Date_And_Time
+    Log To Console    "***STEP_3: Verify_Device_Date_And_Time***"
+    ${RG_Date}    CLI_Bash_Execute    date +%F
+    ${RG_Time}    CLI_Bash_Execute    date +%T
+    @{RG_Date}    Split To Lines    ${RG_Date}
+    ${RG_Date}    Get From List    ${RG_Date}    0
+    ${RG_Time_Seconds}    Convert Time    ${RG_Time}
+    Set Global Variable    ${RG_Date}
+    Set Global Variable    ${RG_Time_Seconds}
 
-class CSVFlowWriter: def init(self, output_dir: str = "flows"): self.output_dir = output_dir os.makedirs(output_dir, exist_ok=True) self.files = defaultdict(lambda: None) self.writers = {}
+STEP_4_Set_The_CriticalRiseThreshold_Value
+    Log To Console    "***STEP_4: Set_The_CriticalRiseThreshold_Value***"
+    UBus_SetParameterValue    SPV    ${UBus_CPU_1_CriticalFallThreshold}    ${VAR_ONE}
+    UBus_SetParameterValue    SPV    ${UBus_CPU_1_CriticalRiseThreshold}    ${VAR_TWO}
+    Sleep    60s
 
-def _get_writer(self, filename: str, fieldnames: list):
-    if self.files[filename] is None:
-        path = os.path.join(self.output_dir, filename)
-        self.files[filename] = open(path, 'w', newline='')
-        writer = csv.DictWriter(self.files[filename], fieldnames=fieldnames)
-        writer.writeheader()
-        self.writers[filename] = writer
-    return self.writers[filename]
+STEP_5_Check_CPU_CriticalRiseTimeStamp
+    Log To Console    "***STEP_5: Check_CPU_CriticalRiseTimeStamp***"
+    ${Return_value}    UBus_GetParameterValue    GPV_Return    ${UBus_CPU_1_CriticalRiseTimeStamp}
+    ${Return_Value}    Split String    ${Return_Value}    .
+    ${ReturnValue_Date}    Get From List    ${Return_Value}    ${VAR_ZERO}   
+    ${Current_Date}    Convert Date    ${ReturnValue_Date}    %Y-%m-%d
+    ${Current_Time}    Convert Date    ${ReturnValue_Date}    %H:%M:%S
+    ${Current_Time}    Convert Time    ${Current_Time}
+    Run Keyword If    '${RG_Date}'=='${Current_Date}' and ${RG_Time_Seconds}<${Current_Time}
+    ...    Log    -pass "Current date and time have been updated correctly"
+    ...    ELSE
+    ...    Run Keyword And Continue on Failure     Fail    -fail "The current date and time have not been updated properly"
+    Set Global Variable    ${Current_Date}
+    Set Global Variable    ${Current_Time}
 
-def write_flows(self, flows: list):
-    for flow in flows:
-        filename = "normal_flows.csv"
-        if flow.get("anomaly"):
-            filename = f"{flow['anomaly_type']}.csv"
+STEP_6_Set_The_CriticalFallThreshold_Value
+    Log To Console    "***STEP_6: Verify_CriticalRiseThreshold***"
+    UBus_SetParameterValue    SPV    ${UBus_CPU_1_CriticalRiseThreshold}    ${Default_CriticalRiseThreshold}
+    UBus_SetParameterValue    SPV    ${UBus_CPU_1_CriticalFallThreshold}    ${Default_CriticalFallThreshold}
+    Sleep    90s
 
-        writer = self._get_writer(filename, flow.keys())
-        writer.writerow(flow)
+STEP_7_Check_CPU_CriticalFallTimeStamp
+    Log To Console    "***STEP_7: Check_CPU_CriticalRiseTimeStamp***"
+    ${Return_value}    UBus_GetParameterValue    GPV_Return    ${UBus_CPU_1_CriticalFallTimeStamp}
+    ${Return_Value}    Split String    ${Return_Value}    .
+    ${ReturnValue_Date}    Get From List    ${Return_Value}    ${VAR_ZERO}   
+    ${Current_Date}    Convert Date    ${ReturnValue_Date}    %Y-%m-%d
+    ${Current_Time}    Convert Date    ${ReturnValue_Date}    %H:%M:%S
+    ${Current_Time}    Convert Time    ${Current_Time}
+    Run Keyword If    '${RG_Date}'=='${Current_Date}' and ${RG_Time_Seconds}<${Current_Time}
+    ...    Log    -pass "Current date and time have been updated correctly"
+    ...    ELSE
+    ...    Run Keyword And Continue on Failure     Fail    -fail "The current date and time have not been updated properly"
+    Set Global Variable    ${Current_Date}
+    Set Global Variable    ${Current_Time}
 
-def close(self):
-    for file in self.files.values():
-        if file:
-            file.close()
+STEP_8_Verify_File_Rm_Pidstat_Full_Is_Created
+    Log To Console    "*** STEP_8: Verify_File_Rm_Pidstat_Full_Is_Created ***"
+    ${Return}    CLI_Bash_Execute     ls -l ${PIDStat_File_Path}
+    ${Status}    Run Keyword and Return Status    Should Contain    ${Return}    ${PIDStat_File_Name}
+    Run Keyword If    '${Status}' == '${True}'
+    ...    Log    -pass "The File is created as expected"
+    ...    ELSE
+    ...    Run Keyword And Continue On Failure    FAIL    -fail "The File is not created is not expected"
 
-class IPFIXSimulator: def init(self, config_file: str): with open(config_file, 'r') as f: self.config = yaml.safe_load(f)
+STEP_9_Restart_RG_Through_CLI
+    Log To Console  "***STEP_9: Restart_RG_Through_CLI***"
+    Common_RG_Restart    ${RG_Restart}
+    Common_CLI_RG_Connect
+    STEP_5_Check_CPU_CriticalRiseTimeStamp
+    STEP_7_Check_CPU_CriticalFallTimeStamp
+    STEP_8_Verify_File_Rm_Pidstat_Full_Is_Created
 
-self.csv_writer = CSVFlowWriter()
-
-    self.profiles = [TrafficProfile(p) for p in self.config['traffic_profiles']]
-    self.anomaly_generator = AnomalyGenerator(self.config.get('anomalies', {}))
-
-    self.simulation_speed = self.config.get('simulation_speed', 1.0)
-    self.start_time = datetime.fromisoformat(
-        self.config.get('start_time', datetime.now().isoformat())
-    )
-    self.end_time = datetime.fromisoformat(
-        self.config.get('end_time', (datetime.now() + timedelta(hours=1)).isoformat())
-    )
-    self.current_time = self.start_time
-    self.running = False
-
-def start(self):
-    logger.info(f"Starting IPFIX simulation from {self.start_time} to {self.end_time}")
-    logger.info("Exporting to CSV files by anomaly type")
-    self.running = True
-    self.run_simulation()
-
-def stop(self):
-    self.running = False
-    self.csv_writer.close()
-    logger.info("Simulation stopped")
-
-def run_simulation(self):
-    while self.running and self.current_time <= self.end_time:
-        active_anomalies = self.anomaly_generator.get_active_anomalies(self.current_time)
-        if active_anomalies:
-            logger.info(f"Active anomalies at {self.current_time}: {len(active_anomalies)}")
-            for anomaly in active_anomalies:
-                logger.info(f"  - {anomaly['type']}")
-
-        all_flows = []
-        for profile in self.profiles:
-            flow_rate = profile.get_flow_rate(self.current_time)
-            num_flows = max(1, int(flow_rate / 60))
-
-            profile_flows = [profile.generate_flow(int(self.current_time.timestamp())) for _ in range(num_flows)]
-            all_flows.extend(profile_flows)
-
-        all_flows = self.anomaly_generator.apply_anomalies(all_flows, active_anomalies)
-
-        self.csv_writer.write_flows(all_flows)
-
-        self.current_time += timedelta(seconds=1 * self.simulation_speed)
-
-        if self.current_time.second % 10 == 0:
-            progress = (self.current_time - self.start_time) / (self.end_time - self.start_time) * 100
-            logger.info(f"Simulation progress: {progress:.1f}% - Current time: {self.current_time}")
-            logger.info(f"Generated {len(all_flows)} flows in this iteration")
-
-        time.sleep(0.1 / self.simulation_speed)
-
-def main(): parser = argparse.ArgumentParser(description='Enhanced IPFIX Traffic Simulator') parser.add_argument('--config', '-c', required=True, help='Configuration file path') parser.add_argument('--log-level', '-l', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], help='Logging level') args = parser.parse_args()
-
-logging.getLogger().setLevel(getattr(logging, args.log_level))
-
-simulator = IPFIXSimulator(args.config)
-
-try:
-    simulator.start()
-except KeyboardInterrupt:
-    logger.info("Simulation interrupted")
-    simulator.stop()
-except Exception as e:
-    logger.error(f"Simulation error: {e}", exc_info=True)
-    simulator.stop()
-
-if name == "main": main()
+Teardown
+    Log To Console    "***Revert back configurations***"
+    TR069_SetParameterValue    SPV    ${TR69_Time_NTPServer1}     ${NTP_Domain_Name_Server1}
+    TR069_SetParameterValue    SPV    ${TR69_Time_NTPServer2}     ${NTP_Domain_Name_Server2}
